@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Uploader</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f4f4f9;
+    }
+    .container {
+      text-align: center;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    input {
+      margin: 10px 0;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      color: white;
+      background: #007BFF;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .progress {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #333;
+    }
+    .message {
+      margin-top: 10px;
+      color: green;
+    }
+    .error {
+      margin-top: 10px;
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Upload Files to GitHub</h1>
+    <label>Choose Music File:</label>
+    <input type="file" id="musicInput" accept="audio/*">
+    <label>Choose Text File:</label>
+    <input type="file" id="textInput" accept="text/plain">
+    <button onclick="uploadFiles()">Upload</button>
+    <p class="progress" id="progress"></p>
+    <p class="message" id="message"></p>
+    <p class="error" id="error"></p>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+  <script>
+    // GitHub Configuration
+    const GITHUB_TOKEN = "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"; // Replace with your token
+    const REPO_OWNER = "rzarisfi";
+    const REPO_NAME = "HarfsMusic";
+    const BRANCH = "main";
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function extractCoverImage(musicFile) {
+      return new Promise((resolve, reject) => {
+        jsmediatags.read(musicFile, {
+          onSuccess: function (tag) {
+            const picture = tag.tags.picture;
+            const base64String = picture.data.reduce((data, byte) => data + String.fromCharCode(byte), '');
+            const base64Image = `data:${picture.format};base64,${window.btoa(base64String)}`;
+            const imageBlob = dataURItoBlob(base64Image);
+            const coverFile = new File([imageBlob], `${musicFile.name.split('.')[0]}.jpg`, { type: "image/jpeg" });
+            resolve(coverFile);
+          },
+          onError: function (error) {
+            reject("Error extracting cover image: " + error);
+          }
+        });
+      });
+    }
+
+    function dataURItoBlob(dataURI) {
+      const byteString = atob(dataURI.split(',')[1]);
+      const arrayBuffer = new ArrayBuffer(byteString.length);
+      const uintArray = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < byteString.length; i++) {
+        uintArray[i] = byteString.charCodeAt(i);
+      }
+      return new Blob([uintArray], { type: "image/jpeg" });
+    }
+
+    async function uploadToGitHub(content, fileName) {
+      const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${fileName}`;
+
+      const body = {
+        message: `Add ${fileName}`,
+        content: content,
+        branch: BRANCH,
+      };
+
+      const response = await fetch(apiUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        return true;
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to upload file.");
+      }
+    }
+
+    async function uploadFiles() {
+      const musicInput = document.getElementById("musicInput");
+      const textInput = document.getElementById("textInput");
+      const progress = document.getElementById("progress");
+      const message = document.getElementById("message");
+      const error = document.getElementById("error");
+
+      progress.textContent = "";
+      message.textContent = "";
+      error.textContent = "";
+
+      if (!musicInput.files.length || !textInput.files.length) {
+        error.textContent = "Please select both a music file and a text file.";
+        return;
+      }
+
+      try {
+        const musicFile = musicInput.files[0];
+        const textFile = textInput.files[0];
+
+        const baseFileName = musicFile.name.split(".")[0];
+
+        // Upload music file
+        progress.textContent = `Uploading ${musicFile.name}...`;
+        const musicContent = await fileToBase64(musicFile);
+        await uploadToGitHub(musicContent, musicFile.name);
+
+        // Extract and upload cover image
+        progress.textContent = `Extracting and uploading ${baseFileName}.jpg...`;
+        const coverFile = await extractCoverImage(musicFile);
+        const coverContent = await fileToBase64(coverFile);
+        await uploadToGitHub(coverContent, `${baseFileName}.jpg`);
+
+        // Upload text file as .txt
+        progress.textContent = `Uploading ${baseFileName}.txt...`;
+        const textContent = await fileToBase64(textFile);
+        await uploadToGitHub(textContent, `${baseFileName}.txt`);
+
+        message.textContent = "Files uploaded successfully!";
+        progress.textContent = "";
+      } catch (err) {
+        error.textContent = `Error: ${err.message}`;
+        progress.textContent = "";
+      }
+    }
+  </script>
+</body>
+</html>
